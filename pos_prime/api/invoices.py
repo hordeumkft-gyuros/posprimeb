@@ -101,7 +101,12 @@ def create_pos_invoice(
 
     profile = frappe.get_doc("POS Profile", pos_profile)
 
-    if not payments and not getattr(profile, "allow_partial_payment", 0) and not flt(store_credit_amount) and not (redeem_loyalty_points and flt(loyalty_points)):
+    if (
+        not payments
+        and not getattr(profile, "allow_partial_payment", 0)
+        and not flt(store_credit_amount)
+        and not (redeem_loyalty_points and flt(loyalty_points))
+    ):
         frappe.throw(_("Payments cannot be empty"))
 
     invoice = frappe.get_doc(
@@ -120,7 +125,9 @@ def create_pos_invoice(
             or profile.write_off_account,
             "write_off_account": profile.write_off_account,
             "write_off_cost_center": profile.write_off_cost_center,
-            "apply_discount_on": apply_discount_on or profile.apply_discount_on or "Grand Total",
+            "apply_discount_on": apply_discount_on
+            or profile.apply_discount_on
+            or "Grand Total",
             "ignore_pricing_rule": 1 if profile.ignore_pricing_rule else 0,
             "disable_rounded_total": 1 if profile.disable_rounded_total else 0,
         }
@@ -140,6 +147,7 @@ def create_pos_invoice(
         amount = safe_float(payment_data.get("amount", 0))
         if amount <= 0:
             continue
+
         total_paid += amount
         invoice.append(
             "payments",
@@ -152,8 +160,16 @@ def create_pos_invoice(
     # ERPNext requires at least one payment row — add a zero-amount default
     # when partial payment or store credit is used but no cash payments were provided
     if not invoice.payments:
-        default_mop = profile.payments[0].mode_of_payment if profile.payments else "Cash"
-        invoice.append("payments", {"mode_of_payment": default_mop, "amount": 0})
+        default_mop = (
+            profile.payments[0].mode_of_payment if profile.payments else "Cash"
+        )
+        invoice.append(
+            "payments",
+            {
+                "mode_of_payment": default_mop,
+                "amount": 0,
+            },
+        )
 
     invoice.paid_amount = total_paid
 
@@ -169,9 +185,13 @@ def create_pos_invoice(
 
     # Discounts
     if additional_discount_percentage:
-        invoice.additional_discount_percentage = safe_float(additional_discount_percentage)
+        invoice.additional_discount_percentage = safe_float(
+            additional_discount_percentage
+        )
+
     if discount_amount:
         invoice.discount_amount = safe_float(discount_amount)
+
     if coupon_code:
         invoice.coupon_code = coupon_code
 
@@ -179,34 +199,44 @@ def create_pos_invoice(
     if redeem_loyalty_points and loyalty_points:
         invoice.redeem_loyalty_points = 1
         invoice.loyalty_points = int(safe_float(loyalty_points))
+
         if loyalty_program:
             invoice.loyalty_program = loyalty_program
+
         if loyalty_redemption_account:
             invoice.loyalty_redemption_account = loyalty_redemption_account
+
         if loyalty_redemption_cost_center:
             invoice.loyalty_redemption_cost_center = loyalty_redemption_cost_center
+
         # Set loyalty_amount so ERPNext includes it in paid_amount calculation.
         # Without this, validate_full_payment() rejects the invoice when
         # Allow Partial Payment is unchecked (paid_amount < grand_total).
         if loyalty_program:
             conversion_factor = flt(
-                frappe.db.get_value("Loyalty Program", loyalty_program, "conversion_factor")
+                frappe.db.get_value(
+                    "Loyalty Program",
+                    loyalty_program,
+                    "conversion_factor",
+                )
             )
+
             if conversion_factor:
-                invoice.loyalty_amount = flt(invoice.loyalty_points * conversion_factor)
+                invoice.loyalty_amount = flt(
+                    invoice.loyalty_points * conversion_factor
+                )
 
     # Return
     if is_return:
         invoice.is_return = 1
+
         if return_against:
             invoice.return_against = return_against
 
     # Campaign from profile (v14/v15: campaign, v16: utm_campaign)
     set_campaign_from_profile(invoice, profile)
 
-    # Set all optional fields (address, contact, currency, commission,
-    # document details, posting, naming, shipping, terms, printing,
-    # payment terms, write-off, sales team)
+    # Set all optional fields
     set_invoice_optional_fields(
         invoice,
         profile,
@@ -237,69 +267,77 @@ def create_pos_invoice(
         payment_terms_template=payment_terms_template,
         allocate_advances_automatically=allocate_advances_automatically,
         write_off_amount=write_off_amount,
-        write_off_outstanding_amount_automatically=write_off_outstanding_amount_automatically,
+        write_off_outstanding_amount_automatically=(
+            write_off_outstanding_amount_automatically
+        ),
         debit_to=debit_to,
         sales_team=sales_team,
     )
 
     # Validate stock availability before submission.
-# The Bin quantity is always stored in Stock UOM, for example m2.
-# A POS line can be in an alternative UOM, for example Doboz.
-if profile.validate_stock_on_save:
-    for item_data in items:
-        item_code = item_data.get("item_code")
-        qty = safe_float(item_data.get("qty", 1))
-        conversion_factor = safe_float(item_data.get("conversion_factor", 1), 1)
-        item_warehouse = item_data.get("warehouse") or profile.warehouse
-
-        # The requested quantity expressed in Stock UOM.
-        # Example: 10 Doboz × 1.23 = 12.30 m2.
-        stock_qty = qty * conversion_factor
-
-        # Product Bundles use the bundle quantity as their own business logic.
-        # Do not apply the Item UOM factor to components here.
-        bundle_components = get_product_bundle_items(item_code)
-        if bundle_components:
-            validate_bundle_stock(item_code, qty, item_warehouse)
-            continue
-
-        is_stock_item = frappe.db.get_value(
-            "Item",
-            item_code,
-            "is_stock_item",
-        )
-
-        if not is_stock_item:
-            continue
-
-        actual_qty = frappe.db.get_value(
-            "Bin",
-            {
-                "item_code": item_code,
-                "warehouse": item_warehouse,
-            },
-            "actual_qty",
-        ) or 0
-
-        if stock_qty > actual_qty:
-            frappe.throw(
-                _(
-                    "{0}: Insufficient stock. Available: {1}, Requested: {2}"
-                ).format(
-                    item_code,
-                    actual_qty,
-                    stock_qty,
-                )
+    # The Bin quantity is always stored in Stock UOM, for example m2.
+    # A POS line can be in an alternative UOM, for example Doboz.
+    if profile.validate_stock_on_save:
+        for item_data in items:
+            item_code = item_data.get("item_code")
+            qty = safe_float(item_data.get("qty", 1))
+            conversion_factor = safe_float(
+                item_data.get("conversion_factor", 1),
+                1,
             )
+            item_warehouse = item_data.get("warehouse") or profile.warehouse
+
+            # The requested quantity expressed in Stock UOM.
+            # Example: 10 Doboz × 1.23 = 12.30 m2.
+            stock_qty = qty * conversion_factor
+
+            # Product Bundles use the bundle quantity as their own business logic.
+            # Do not apply the Item UOM factor to components here.
+            bundle_components = get_product_bundle_items(item_code)
+
+            if bundle_components:
+                validate_bundle_stock(item_code, qty, item_warehouse)
+                continue
+
+            is_stock_item = frappe.db.get_value(
+                "Item",
+                item_code,
+                "is_stock_item",
+            )
+
+            if not is_stock_item:
+                continue
+
+            actual_qty = frappe.db.get_value(
+                "Bin",
+                {
+                    "item_code": item_code,
+                    "warehouse": item_warehouse,
+                },
+                "actual_qty",
+            ) or 0
+
+            if stock_qty > actual_qty:
+                frappe.throw(
+                    _(
+                        "{0}: Insufficient stock. Available: {1}, Requested: {2}"
+                    ).format(
+                        item_code,
+                        actual_qty,
+                        stock_qty,
+                    )
+                )
 
     # Store credit via advance Payment Entries
     store_credit = flt(store_credit_amount)
     credit_data = None
+
     if store_credit > 0:
         from pos_prime.api.customer_profile import get_store_credit
 
         credit_data = get_store_credit(customer, profile.company)
         available = flt(credit_data.get("total_advance", 0))
+
         if store_credit > available:
             store_credit = available
 
@@ -307,60 +345,67 @@ if profile.validate_stock_on_save:
     invoice.set_missing_values()
 
     # Cap payment row amounts so total paid does not exceed the invoice total.
-    # When a customer tenders more cash than the bill (e.g. pays 1000 for an
-    # 880 bill), the frontend shows the change but the backend should record
-    # only the net amount.  Without this cap, ERPNext's POS Closing Entry
-    # get_payments() may fail to subtract change_amount (due to
-    # account_for_change_amount vs payment-account mismatch), inflating the
-    # expected cash and showing a false shortage.
     if not is_return and flt(invoice.change_amount) > 0:
         excess = flt(invoice.change_amount)
-        for p in reversed(invoice.payments):
+
+        for payment in reversed(invoice.payments):
             if excess <= 0:
                 break
-            reduction = min(excess, flt(p.amount))
-            p.amount = flt(p.amount - reduction)
+
+            reduction = min(excess, flt(payment.amount))
+            payment.amount = flt(payment.amount - reduction)
             excess -= reduction
 
     # Now grand_total is calculated — cap store credit and allocate advances FIFO
     if store_credit > 0 and credit_data:
         invoice_total = flt(invoice.rounded_total or invoice.grand_total)
+
         if invoice_total > 0:
             store_credit = min(store_credit, invoice_total)
 
         remaining = store_credit
-        for adv in credit_data.get("advances", []):
+
+        for advance in credit_data.get("advances", []):
             if remaining <= 0:
                 break
-            alloc = min(remaining, flt(adv.amount))
-            if alloc <= 0:
+
+            allocated_amount = min(remaining, flt(advance.amount))
+
+            if allocated_amount <= 0:
                 continue
-            invoice.append("advances", {
-                "reference_type": adv.reference_type,
-                "reference_name": adv.reference_name,
-                "reference_row": adv.get("reference_row") or None,
-                "advance_amount": flt(adv.amount),
-                "allocated_amount": alloc,
-                "remarks": adv.get("remarks", ""),
-            })
-            remaining -= alloc
+
+            invoice.append(
+                "advances",
+                {
+                    "reference_type": advance.reference_type,
+                    "reference_name": advance.reference_name,
+                    "reference_row": advance.get("reference_row") or None,
+                    "advance_amount": flt(advance.amount),
+                    "allocated_amount": allocated_amount,
+                    "remarks": advance.get("remarks", ""),
+                },
+            )
+
+            remaining -= allocated_amount
 
         invoice.total_advance = flt(store_credit - remaining)
 
     # Override POS validation to account for advance payments
     if flt(invoice.total_advance) > 0:
-        _orig_validate_full = invoice.validate_full_payment
+        original_validate_full_payment = invoice.validate_full_payment
 
-        def _patched_validate_full():
+        def patched_validate_full_payment():
             effective_paid = flt(invoice.paid_amount) + flt(invoice.total_advance)
             target = flt(invoice.rounded_total or invoice.grand_total)
+
             if effective_paid >= target:
                 return
-            _orig_validate_full()
 
-        invoice.validate_full_payment = _patched_validate_full
+            original_validate_full_payment()
 
-        def _patched_set_outstanding():
+        invoice.validate_full_payment = patched_validate_full_payment
+
+        def patched_set_outstanding_amount():
             invoice.outstanding_amount = max(
                 0,
                 flt(invoice.rounded_total or invoice.grand_total)
@@ -370,7 +415,7 @@ if profile.validate_stock_on_save:
                 + flt(invoice.write_off_amount),
             )
 
-        invoice.set_outstanding_amount = _patched_set_outstanding
+        invoice.set_outstanding_amount = patched_set_outstanding_amount
 
     # When "Validate Stock on Save" is unchecked, bypass ERPNext's
     # validate_stock_availablility() which runs on both insert and submit.
@@ -384,20 +429,29 @@ if profile.validate_stock_on_save:
     # Payment Entries: reduce unallocated_amount directly
     # Journal Entries: tracked via the advances child table (allocation subquery)
     if flt(invoice.total_advance) > 0:
-        for adv_row in invoice.advances:
-            allocated = flt(adv_row.allocated_amount)
+        for advance_row in invoice.advances:
+            allocated = flt(advance_row.allocated_amount)
+
             if allocated <= 0:
                 continue
-            if adv_row.reference_type == "Payment Entry":
-                pe_unallocated = flt(
+
+            if advance_row.reference_type == "Payment Entry":
+                payment_entry_unallocated = flt(
                     frappe.db.get_value(
-                        "Payment Entry", adv_row.reference_name, "unallocated_amount"
+                        "Payment Entry",
+                        advance_row.reference_name,
+                        "unallocated_amount",
                     )
                 )
-                new_unallocated = max(0, pe_unallocated - allocated)
+
+                new_unallocated = max(
+                    0,
+                    payment_entry_unallocated - allocated,
+                )
+
                 frappe.db.set_value(
                     "Payment Entry",
-                    adv_row.reference_name,
+                    advance_row.reference_name,
                     "unallocated_amount",
                     new_unallocated,
                     update_modified=False,
