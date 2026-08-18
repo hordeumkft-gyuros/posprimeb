@@ -164,25 +164,35 @@ export const useCartStore = defineStore('cart', () => {
   }
 }
   function updateQty(index: number, qty: number, availableQty?: number, validateStock = true): string | null {
-    if (qty <= 0) {
-      removeItem(index)
-      return null
-    }
-    // Stock validation if available qty is provided and validation is enabled
-    if (validateStock && availableQty !== undefined && availableQty > 0) {
-      const item = items.value[index]
-      const otherCartQty = items.value
-        .filter((i, idx) => idx !== index && i.item_code === item.item_code)
-        .reduce((sum, i) => sum + i.qty, 0)
-      if (qty + otherCartQty > availableQty) {
-        return __('Not enough stock. Available: {0}', [String(availableQty)])
-      }
-    }
-    items.value[index].qty = qty
-    recalcItemAmount(index)
-    debounceTaxCalculation()
+  if (qty <= 0) {
+    removeItem(index)
     return null
   }
+
+  const item = items.value[index]
+  if (!item) return null
+
+  const available = availableQty ?? item.available_qty
+
+  if (validateStock && available !== undefined && item.is_stock_item !== false) {
+    const otherCartStockQty = items.value
+      .filter((cartItem, rowIndex) =>
+        rowIndex !== index && cartItem.item_code === item.item_code
+      )
+      .reduce((sum, cartItem) => sum + getStockQty(cartItem), 0)
+
+    const requestedStockQty = qty * (item.conversion_factor || 1)
+
+    if (otherCartStockQty + requestedStockQty > available) {
+      return __('Not enough stock. Available: {0}', [String(available)])
+    }
+  }
+
+  item.qty = qty
+  recalcItemAmount(index)
+  debounceTaxCalculation()
+  return null
+}
 
   function updateRate(index: number, rate: number) {
     items.value[index].rate = rate
@@ -209,11 +219,23 @@ export const useCartStore = defineStore('cart', () => {
   }
 
   function updateItemUom(index: number, uom: string, conversionFactor: number) {
-    items.value[index].uom = uom
-    items.value[index].conversion_factor = conversionFactor
-    recalcItemAmount(index)
-    debounceTaxCalculation()
-  }
+  const item = items.value[index]
+  if (!item || conversionFactor <= 0) return
+
+  item.uom = uom
+  item.conversion_factor = conversionFactor
+
+  // UOM-váltáskor az egységár is változik.
+  // Példa: 9 990 Ft/m² × 1,23 = 12 287,70 Ft/Doboz.
+  item.rate = roundMoney(
+    (item.base_rate || item.rate) *
+    conversionFactor /
+    (item.price_conversion_factor || 1)
+  )
+
+  recalcItemAmount(index)
+  debounceTaxCalculation()
+}
 
   function updateItemDiscountAmount(index: number, discountAmt: number) {
     items.value[index].discount_amount = Math.max(discountAmt, 0)
