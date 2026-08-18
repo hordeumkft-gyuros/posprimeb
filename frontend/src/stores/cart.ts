@@ -8,6 +8,14 @@ import type { CartItem, Item, TaxRow, InvoiceOptions } from '@/types'
 
 let taxRequestId = 0
 
+function roundMoney(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100
+}
+
+function getStockQty(item: Pick<CartItem, 'qty' | 'conversion_factor'>) {
+  return item.qty * (item.conversion_factor || 1)
+}
+
 export const useCartStore = defineStore('cart', () => {
   const items = ref<CartItem[]>([])
   const selectedItemIndex = ref<number | null>(null)
