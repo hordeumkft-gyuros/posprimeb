@@ -18,7 +18,6 @@ export interface POSProfile {
   apply_discount_on: string
   item_groups: POSItemGroup[]
   payments: POSPaymentMethod[]
-  // POS Profile settings flags
   allow_discount_change: boolean
   allow_rate_change: boolean
   allow_partial_payment: boolean
@@ -53,12 +52,22 @@ export interface POSPaymentMethod {
   allow_in_returns: boolean
 }
 
+export interface UOMConversion {
+  uom: string
+  conversion_factor: number
+}
+
 export interface Item {
   item_code: string
   item_name: string
   description: string
   item_group: string
   stock_uom: string
+  sales_uom?: string
+  sales_conversion_factor?: number
+  uom_conversions?: UOMConversion[]
+  price_uom?: string
+  price_conversion_factor?: number
   image: string | null
   rate: number
   actual_qty: number
@@ -92,6 +101,15 @@ export interface CartItem {
   batch_no: string | null
   serial_and_batch_bundle: string | null
   conversion_factor: number
+
+  // UOM price / stock metadata
+  // base_rate: eredeti árlistaár, nálad Ft / m2
+  // price_conversion_factor: az árlista UOM konverziós faktora; m2 esetén 1
+  // available_qty: készlet Stock UOM-ban, nálad m2-ben
+  base_rate?: number
+  price_conversion_factor?: number
+  available_qty?: number
+
   // Extended fields
   item_tax_template: string | null
   margin_type: string | null
@@ -100,6 +118,7 @@ export interface CartItem {
   project: string | null
   weight_per_unit: number | null
   weight_uom: string | null
+
   // Pricing rule fields
   is_free_item?: boolean
   pricing_rules?: string | null
@@ -137,7 +156,7 @@ export interface CustomerAddress {
   address_line2: string | null
   city: string
   state: string | null
-  pincode: string | null
+  pincode: string
   country: string
   phone: string | null
   email_id: string | null
@@ -164,18 +183,14 @@ export interface PaymentEntry {
 }
 
 export interface InvoiceOptions {
-  // Address & contact
   customer_address?: string | null
   shipping_address_name?: string | null
   contact_person?: string | null
-  // Currency
   conversion_rate?: number | null
   price_list_currency?: string | null
   plc_conversion_rate?: number | null
-  // Commission
   sales_partner?: string | null
   commission_rate?: number | null
-  // Document details
   project?: string | null
   cost_center?: string | null
   remarks?: string | null
@@ -185,22 +200,17 @@ export interface InvoiceOptions {
   posting_date?: string | null
   posting_time?: string | null
   naming_series?: string | null
-  // Shipping & terms
   shipping_rule?: string | null
   tc_name?: string | null
   terms?: string | null
-  // Printing
   letter_head?: string | null
   select_print_heading?: string | null
   group_same_items?: boolean
   language?: string | null
-  // Payment terms
   payment_terms_template?: string | null
   allocate_advances_automatically?: boolean
-  // Write-off
   write_off_amount?: number
   debit_to?: string | null
-  // Sales team
   sales_team?: { sales_person: string; allocated_percentage: number }[]
 }
 
@@ -212,12 +222,10 @@ export interface POSInvoice {
   owner?: string
   modified?: string | null
 
-  // Customer
   customer: string
   customer_name: string
   tax_id?: string | null
 
-  // Address & contact
   customer_address?: string | null
   address_display?: string | null
   contact_person?: string | null
@@ -230,7 +238,6 @@ export interface POSInvoice {
   company_address?: string | null
   company_address_display?: string | null
 
-  // Company & dates
   company?: string
   pos_profile?: string
   posting_date: string
@@ -238,14 +245,12 @@ export interface POSInvoice {
   set_posting_time?: boolean
   due_date?: string | null
 
-  // Currency
   currency: string
   conversion_rate?: number | null
   selling_price_list?: string | null
   price_list_currency?: string | null
   plc_conversion_rate?: number | null
 
-  // Totals
   total_qty?: number
   total?: number
   net_total: number
@@ -254,7 +259,6 @@ export interface POSInvoice {
   rounding_adjustment: number
   in_words?: string | null
 
-  // Base currency totals
   base_total?: number
   base_net_total?: number
   base_grand_total?: number
@@ -262,7 +266,6 @@ export interface POSInvoice {
   base_rounding_adjustment?: number
   base_in_words?: string | null
 
-  // Payment
   paid_amount: number
   base_paid_amount?: number
   change_amount: number
@@ -271,21 +274,18 @@ export interface POSInvoice {
   total_advance?: number
   account_for_change_amount?: string | null
 
-  // Taxes
   taxes_and_charges?: string | null
   tax_category?: string | null
   shipping_rule?: string | null
   total_taxes_and_charges: number
   base_total_taxes_and_charges?: number
 
-  // Discount
   apply_discount_on?: string
   additional_discount_percentage: number
   discount_amount: number
   base_discount_amount?: number
   coupon_code: string | null
 
-  // Loyalty
   loyalty_points: number
   loyalty_amount: number
   redeem_loyalty_points?: boolean
@@ -293,22 +293,18 @@ export interface POSInvoice {
   loyalty_redemption_account?: string | null
   loyalty_redemption_cost_center?: string | null
 
-  // Return
   is_return: boolean
   return_against: string | null
 
-  // Write-off
   write_off_amount: number
   base_write_off_amount?: number
   write_off_account?: string | null
   write_off_cost_center?: string | null
 
-  // Commission
   sales_partner?: string | null
   commission_rate?: number | null
   total_commission?: number | null
 
-  // Document details
   project?: string | null
   cost_center?: string | null
   po_no?: string | null
@@ -316,25 +312,20 @@ export interface POSInvoice {
   remarks?: string | null
   campaign?: string | null
 
-  // Printing
   letter_head?: string | null
   select_print_heading?: string | null
   group_same_items?: boolean
   language?: string | null
   print_format?: string | null
 
-  // Payment terms
   payment_terms_template?: string | null
   allocate_advances_automatically?: boolean
 
-  // Consolidated
   consolidated_invoice?: string | null
   is_discounted?: boolean
 
-  // Weight
   total_net_weight?: number
 
-  // Child tables
   items: InvoiceItem[]
   payments: PaymentEntry[]
   taxes: TaxRow[]
