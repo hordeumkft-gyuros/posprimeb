@@ -1,7 +1,5 @@
-<!-- Copyright (c) 2026, Ravindu Gajanayaka -->
-<!-- Licensed under GPLv3. See license.txt -->
-
 <script setup lang="ts">
+import { computed } from 'vue'
 import { Package, Plus } from 'lucide-vue-next'
 import { useSettingsStore } from '@/stores/settings'
 import { useCurrency } from '@/composables/useCurrency'
@@ -17,6 +15,25 @@ const emit = defineEmits<{
 
 const settingsStore = useSettingsStore()
 const { formatCurrency } = useCurrency()
+
+const salesUom = computed(() => props.item.sales_uom || props.item.stock_uom)
+
+const salesConversionFactor = computed(
+  () => props.item.sales_conversion_factor || 1
+)
+
+const hasSalesConversion = computed(
+  () =>
+    salesUom.value !== props.item.stock_uom &&
+    salesConversionFactor.value !== 1
+)
+
+const salesRate = computed(() => {
+  const baseRate = props.item.rate || 0
+  const factor = salesConversionFactor.value
+
+  return Math.round((baseRate * factor + Number.EPSILON) * 100) / 100
+})
 </script>
 
 <template>
@@ -26,7 +43,10 @@ const { formatCurrency } = useCurrency()
     class="pos-card group relative flex flex-col rounded-lg overflow-hidden hover:scale-[1.02] transition-all duration-200 text-left"
   >
     <!-- Image -->
-    <div v-if="!settingsStore.hideImages" class="relative h-32 min-h-[8rem] bg-gray-50 dark:bg-gray-800 flex items-center justify-center overflow-hidden">
+    <div
+      v-if="!settingsStore.hideImages"
+      class="relative h-32 min-h-[8rem] bg-gray-50 dark:bg-gray-800 flex items-center justify-center overflow-hidden"
+    >
       <img
         v-if="item.image"
         :src="item.image"
@@ -34,16 +54,25 @@ const { formatCurrency } = useCurrency()
         loading="lazy"
         class="w-full h-full object-cover"
       />
-      <Package v-else class="text-gray-200 dark:text-gray-700" :size="36" />
+
+      <Package
+        v-else
+        class="text-gray-200 dark:text-gray-700"
+        :size="36"
+      />
 
       <!-- Hover overlay -->
-      <div class="absolute inset-0 bg-blue-600/0 group-hover:bg-blue-600/10 transition-colors duration-200 flex items-center justify-center">
-        <div class="w-8 h-8 bg-white dark:bg-gray-800 rounded-full shadow-lg flex items-center justify-center opacity-0 group-hover:opacity-100 scale-75 group-hover:scale-100 transition-all duration-200">
+      <div
+        class="absolute inset-0 bg-blue-600/0 group-hover:bg-blue-600/10 transition-colors duration-200 flex items-center justify-center"
+      >
+        <div
+          class="w-8 h-8 bg-white dark:bg-gray-800 rounded-full shadow-lg flex items-center justify-center opacity-0 group-hover:opacity-100 scale-75 group-hover:scale-100 transition-all duration-200"
+        >
           <Plus :size="16" class="text-blue-600 dark:text-blue-400" />
         </div>
       </div>
 
-      <!-- Stock badge (only for stock items, not services) -->
+      <!-- Stock badge: Stock UOM-ban, például m2 -->
       <span
         v-if="(item.is_stock_item || item.is_product_bundle) && item.actual_qty !== undefined"
         class="absolute top-1.5 right-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded-md backdrop-blur-sm"
@@ -55,7 +84,11 @@ const { formatCurrency } = useCurrency()
               : 'bg-red-500/90 text-white'
         "
       >
-        {{ item.actual_qty > 0 ? item.actual_qty : __('Out') }}
+        {{
+          item.actual_qty > 0
+            ? `${item.actual_qty} ${item.stock_uom}`
+            : __('Out')
+        }}
       </span>
 
       <!-- Bundle badge -->
@@ -69,16 +102,46 @@ const { formatCurrency } = useCurrency()
 
     <!-- Item Info -->
     <div class="px-2 py-1.5 flex-1 flex flex-col min-h-[3rem]">
-      <div class="text-xs font-semibold text-gray-800 dark:text-gray-200 line-clamp-2 leading-snug">
+      <div
+        class="text-xs font-semibold text-gray-800 dark:text-gray-200 line-clamp-2 leading-snug"
+      >
         {{ item.item_name }}
       </div>
+
       <div class="mt-auto pt-1">
-        <span class="text-sm font-bold text-gray-900 dark:text-gray-100">
-          {{ formatCurrency(item.rate) }}
-        </span>
-        <span v-if="item.stock_uom" class="text-[10px] text-gray-400 dark:text-gray-500 ml-0.5">
-          / {{ item.stock_uom }}
-        </span>
+        <!-- Árlistaár: jelenlegi beállítás szerint Ft / m2 -->
+        <div class="leading-tight">
+          <span class="text-sm font-bold text-gray-900 dark:text-gray-100">
+            {{ formatCurrency(item.rate) }}
+          </span>
+
+          <span
+            v-if="item.stock_uom"
+            class="text-[10px] text-gray-400 dark:text-gray-500 ml-0.5"
+          >
+            / {{ item.stock_uom }}
+          </span>
+        </div>
+
+        <!-- Dobozos / alternatív értékesítési adat -->
+        <template v-if="hasSalesConversion">
+          <div
+            class="mt-0.5 text-[9px] font-medium text-blue-600 dark:text-blue-400"
+          >
+            {{ __('Sales UOM') }}: {{ salesUom }}
+          </div>
+
+          <div class="text-[9px] text-gray-500 dark:text-gray-400">
+            1 {{ salesUom }} = {{ salesConversionFactor.toFixed(2) }}
+            {{ item.stock_uom }}
+          </div>
+
+          <div
+            class="text-[10px] font-bold text-gray-800 dark:text-gray-200"
+          >
+            {{ formatCurrency(salesRate) }} / {{ salesUom }}
+          </div>
+        </template>
       </div>
     </div>
   </button>
