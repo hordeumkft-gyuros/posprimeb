@@ -126,33 +126,43 @@ export const useCartStore = defineStore('cart', () => {
 }
 
   function createCartItem(item: Item): CartItem {
-    return {
-      item_code: item.item_code,
-      item_name: item.item_name,
-      rate: item.rate,
-      qty: 1,
-      amount: item.rate,
-      uom: item.stock_uom,
-      discount_percentage: 0,
-      discount_amount: 0,
-      image: item.image,
-      stock_uom: item.stock_uom,
-      has_serial_no: item.has_serial_no,
-      has_batch_no: item.has_batch_no,
-      serial_no: null,
-      batch_no: null,
-      serial_and_batch_bundle: null,
-      conversion_factor: 1,
-      item_tax_template: item.item_tax_template || null,
-      margin_type: null,
-      margin_rate_or_amount: 0,
-      description: item.description || null,
-      project: null,
-      weight_per_unit: item.weight_per_unit || null,
-      weight_uom: item.weight_uom || null,
-    }
-  }
+  const conversionFactor = item.sales_conversion_factor || 1
+  const salesUom = item.sales_uom || item.stock_uom
+  const baseRate = item.rate || 0
 
+  // A jelenlegi árlista m²-alapú, ezért a Doboz ára:
+  // Ft/doboz = Ft/m² × m²/doboz
+  const salesRate = roundMoney(baseRate * conversionFactor)
+
+  return {
+    item_code: item.item_code,
+    item_name: item.item_name,
+    rate: salesRate,
+    base_rate: baseRate,
+    price_conversion_factor: item.price_conversion_factor || 1,
+    qty: 1,
+    amount: salesRate,
+    uom: salesUom,
+    discount_percentage: 0,
+    discount_amount: 0,
+    image: item.image,
+    stock_uom: item.stock_uom,
+    available_qty: item.actual_qty,
+    has_serial_no: item.has_serial_no,
+    has_batch_no: item.has_batch_no,
+    serial_no: null,
+    batch_no: null,
+    serial_and_batch_bundle: null,
+    conversion_factor: conversionFactor,
+    item_tax_template: item.item_tax_template || null,
+    margin_type: null,
+    margin_rate_or_amount: 0,
+    description: item.description || null,
+    project: null,
+    weight_per_unit: item.weight_per_unit || null,
+    weight_uom: item.weight_uom || null,
+  }
+}
   function updateQty(index: number, qty: number, availableQty?: number, validateStock = true): string | null {
     if (qty <= 0) {
       removeItem(index)
