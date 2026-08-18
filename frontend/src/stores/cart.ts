@@ -74,40 +74,56 @@ export const useCartStore = defineStore('cart', () => {
   )
 
   function addItem(item: Item, validateStock = true): string | null {
-    // Stock validation: check available qty for stock items
-    if (validateStock && item.is_stock_item) {
-      const available = item.actual_qty ?? 0
-      // Sum qty already in cart for this item
-      const cartQty = items.value
-        .filter((i) => i.item_code === item.item_code)
-        .reduce((sum, i) => sum + i.qty, 0)
-      if (cartQty >= available) {
-        return __('Not enough stock. Available: {0}', [String(available)])
-      }
-    }
+  const salesFactor = item.sales_conversion_factor || 1
 
-    // For batch/serial items, don't merge — they get separate lines
-    if (item.has_batch_no || item.has_serial_no) {
-      items.value.push(createCartItem(item))
-      selectedItemIndex.value = items.value.length - 1
-      debounceTaxCalculation()
-      return null
-    }
+  if (validateStock && item.is_stock_item) {
+    const available = item.actual_qty ?? 0
 
-    const existingIndex = items.value.findIndex(
-      (i) => i.item_code === item.item_code && !i.batch_no && !i.serial_no
-    )
-    if (existingIndex >= 0) {
-      items.value[existingIndex].qty += 1
-      recalcItemAmount(existingIndex)
-      selectedItemIndex.value = existingIndex
-    } else {
-      items.value.push(createCartItem(item))
-      selectedItemIndex.value = items.value.length - 1
+    const existingStockQty = items.value
+      .filter((cartItem) => cartItem.item_code === item.item_code)
+      .reduce((sum, cartItem) => sum + getStockQty(cartItem), 0)
+
+    const requiredStockQty = existingStockQty + salesFactor
+
+    if (requiredStockQty > available) {
+      return __('Not enough stock. Available: {0}', [String(available)])
     }
+  }
+
+  if (item.has_batch_no || item.has_serial_no) {
+    items.value.push(createCartItem(item))
+    selectedItemIndex.value = items.value.length - 1
     debounceTaxCalculation()
     return null
   }
+
+  const existingIndex = items.value.findIndex(
+    (cartItem) =>
+      cartItem.item_code === item.item_code &&
+      !cartItem.batch_no &&
+      !cartItem.serial_no
+  )
+
+  if (existingIndex >= 0) {
+    const cartItem = items.value[existingIndex]
+    const available = cartItem.available_qty ?? item.actual_qty ?? 0
+    const requestedStockQty = getStockQty(cartItem) + (cartItem.conversion_factor || 1)
+
+    if (validateStock && cartItem.is_free_item !== true && requestedStockQty > available) {
+      return __('Not enough stock. Available: {0}', [String(available)])
+    }
+
+    cartItem.qty += 1
+    recalcItemAmount(existingIndex)
+    selectedItemIndex.value = existingIndex
+  } else {
+    items.value.push(createCartItem(item))
+    selectedItemIndex.value = items.value.length - 1
+  }
+
+  debounceTaxCalculation()
+  return null
+}
 
   function createCartItem(item: Item): CartItem {
     return {
