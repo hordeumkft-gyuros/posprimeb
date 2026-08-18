@@ -8,6 +8,14 @@ import type { CartItem, Item, TaxRow, InvoiceOptions } from '@/types'
 
 let taxRequestId = 0
 
+function roundMoney(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100
+}
+
+function getStockQty(item: Pick<CartItem, 'qty' | 'conversion_factor'>) {
+  return item.qty * (item.conversion_factor || 1)
+}
+
 export const useCartStore = defineStore('cart', () => {
   const items = ref<CartItem[]>([])
   const selectedItemIndex = ref<number | null>(null)
@@ -66,89 +74,125 @@ export const useCartStore = defineStore('cart', () => {
   )
 
   function addItem(item: Item, validateStock = true): string | null {
-    // Stock validation: check available qty for stock items
-    if (validateStock && item.is_stock_item) {
-      const available = item.actual_qty ?? 0
-      // Sum qty already in cart for this item
-      const cartQty = items.value
-        .filter((i) => i.item_code === item.item_code)
-        .reduce((sum, i) => sum + i.qty, 0)
-      if (cartQty >= available) {
-        return __('Not enough stock. Available: {0}', [String(available)])
-      }
-    }
+  const salesFactor = item.sales_conversion_factor || 1
 
-    // For batch/serial items, don't merge — they get separate lines
-    if (item.has_batch_no || item.has_serial_no) {
-      items.value.push(createCartItem(item))
-      selectedItemIndex.value = items.value.length - 1
-      debounceTaxCalculation()
-      return null
-    }
+  if (validateStock && item.is_stock_item) {
+    const available = item.actual_qty ?? 0
 
-    const existingIndex = items.value.findIndex(
-      (i) => i.item_code === item.item_code && !i.batch_no && !i.serial_no
-    )
-    if (existingIndex >= 0) {
-      items.value[existingIndex].qty += 1
-      recalcItemAmount(existingIndex)
-      selectedItemIndex.value = existingIndex
-    } else {
-      items.value.push(createCartItem(item))
-      selectedItemIndex.value = items.value.length - 1
+    const existingStockQty = items.value
+      .filter((cartItem) => cartItem.item_code === item.item_code)
+      .reduce((sum, cartItem) => sum + getStockQty(cartItem), 0)
+
+    const requiredStockQty = existingStockQty + salesFactor
+
+    if (requiredStockQty > available) {
+      return __('Not enough stock. Available: {0}', [String(available)])
     }
+  }
+
+  if (item.has_batch_no || item.has_serial_no) {
+    items.value.push(createCartItem(item))
+    selectedItemIndex.value = items.value.length - 1
     debounceTaxCalculation()
     return null
   }
+
+  const existingIndex = items.value.findIndex(
+    (cartItem) =>
+      cartItem.item_code === item.item_code &&
+      !cartItem.batch_no &&
+      !cartItem.serial_no
+  )
+
+  if (existingIndex >= 0) {
+    const cartItem = items.value[existingIndex]
+    const available = cartItem.available_qty ?? item.actual_qty ?? 0
+    const requestedStockQty = getStockQty(cartItem) + (cartItem.conversion_factor || 1)
+
+    if (validateStock && cartItem.is_free_item !== true && requestedStockQty > available) {
+      return __('Not enough stock. Available: {0}', [String(available)])
+    }
+
+    cartItem.qty += 1
+    recalcItemAmount(existingIndex)
+    selectedItemIndex.value = existingIndex
+  } else {
+    items.value.push(createCartItem(item))
+    selectedItemIndex.value = items.value.length - 1
+  }
+
+  debounceTaxCalculation()
+  return null
+}
 
   function createCartItem(item: Item): CartItem {
-    return {
-      item_code: item.item_code,
-      item_name: item.item_name,
-      rate: item.rate,
-      qty: 1,
-      amount: item.rate,
-      uom: item.stock_uom,
-      discount_percentage: 0,
-      discount_amount: 0,
-      image: item.image,
-      stock_uom: item.stock_uom,
-      has_serial_no: item.has_serial_no,
-      has_batch_no: item.has_batch_no,
-      serial_no: null,
-      batch_no: null,
-      serial_and_batch_bundle: null,
-      conversion_factor: 1,
-      item_tax_template: item.item_tax_template || null,
-      margin_type: null,
-      margin_rate_or_amount: 0,
-      description: item.description || null,
-      project: null,
-      weight_per_unit: item.weight_per_unit || null,
-      weight_uom: item.weight_uom || null,
+  const conversionFactor = item.sales_conversion_factor || 1
+  const salesUom = item.sales_uom || item.stock_uom
+  const baseRate = item.rate || 0
+
+  // A jelenlegi árlista m²-alapú, ezért a Doboz ára:
+  // Ft/doboz = Ft/m² × m²/doboz
+  const salesRate = roundMoney(baseRate * conversionFactor)
+
+  return {
+    item_code: item.item_code,
+    item_name: item.item_name,
+    rate: salesRate,
+    base_rate: baseRate,
+    price_conversion_factor: item.price_conversion_factor || 1,
+    qty: 1,
+    amount: salesRate,
+    uom: salesUom,
+    discount_percentage: 0,
+    discount_amount: 0,
+    image: item.image,
+    stock_uom: item.stock_uom,
+    available_qty: item.actual_qty,
+    has_serial_no: item.has_serial_no,
+    has_batch_no: item.has_batch_no,
+    serial_no: null,
+    batch_no: null,
+    serial_and_batch_bundle: null,
+    conversion_factor: conversionFactor,
+    item_tax_template: item.item_tax_template || null,
+    margin_type: null,
+    margin_rate_or_amount: 0,
+    description: item.description || null,
+    project: null,
+    weight_per_unit: item.weight_per_unit || null,
+    weight_uom: item.weight_uom || null,
+  }
+}
+  function updateQty(index: number, qty: number, availableQty?: number, validateStock = true): string | null {
+  if (qty <= 0) {
+    removeItem(index)
+    return null
+  }
+
+  const item = items.value[index]
+  if (!item) return null
+
+  const available = availableQty ?? item.available_qty
+
+  if (validateStock && available !== undefined && item.is_stock_item !== false) {
+    const otherCartStockQty = items.value
+      .filter((cartItem, rowIndex) =>
+        rowIndex !== index && cartItem.item_code === item.item_code
+      )
+      .reduce((sum, cartItem) => sum + getStockQty(cartItem), 0)
+
+    const requestedStockQty = qty * (item.conversion_factor || 1)
+
+    if (otherCartStockQty + requestedStockQty > available) {
+      return __('Not enough stock. Available: {0}', [String(available)])
     }
   }
 
-  function updateQty(index: number, qty: number, availableQty?: number, validateStock = true): string | null {
-    if (qty <= 0) {
-      removeItem(index)
-      return null
-    }
-    // Stock validation if available qty is provided and validation is enabled
-    if (validateStock && availableQty !== undefined && availableQty > 0) {
-      const item = items.value[index]
-      const otherCartQty = items.value
-        .filter((i, idx) => idx !== index && i.item_code === item.item_code)
-        .reduce((sum, i) => sum + i.qty, 0)
-      if (qty + otherCartQty > availableQty) {
-        return __('Not enough stock. Available: {0}', [String(availableQty)])
-      }
-    }
-    items.value[index].qty = qty
-    recalcItemAmount(index)
-    debounceTaxCalculation()
-    return null
-  }
+  item.qty = qty
+  recalcItemAmount(index)
+  debounceTaxCalculation()
+  return null
+}
 
   function updateRate(index: number, rate: number) {
     items.value[index].rate = rate
@@ -175,11 +219,23 @@ export const useCartStore = defineStore('cart', () => {
   }
 
   function updateItemUom(index: number, uom: string, conversionFactor: number) {
-    items.value[index].uom = uom
-    items.value[index].conversion_factor = conversionFactor
-    recalcItemAmount(index)
-    debounceTaxCalculation()
-  }
+  const item = items.value[index]
+  if (!item || conversionFactor <= 0) return
+
+  item.uom = uom
+  item.conversion_factor = conversionFactor
+
+  // UOM-váltáskor az egységár is változik.
+  // Példa: 9 990 Ft/m² × 1,23 = 12 287,70 Ft/Doboz.
+  item.rate = roundMoney(
+    (item.base_rate || item.rate) *
+    conversionFactor /
+    (item.price_conversion_factor || 1)
+  )
+
+  recalcItemAmount(index)
+  debounceTaxCalculation()
+}
 
   function updateItemDiscountAmount(index: number, discountAmt: number) {
     items.value[index].discount_amount = Math.max(discountAmt, 0)

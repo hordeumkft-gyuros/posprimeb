@@ -88,8 +88,23 @@ const { formatCurrency } = useCurrency()
             SN: {{ item.serial_no }}
           </span>
         </div>
-        <div v-if="item.uom !== item.stock_uom" class="text-[9px] text-gray-400 dark:text-gray-500 mt-0.5">
-          {{ item.uom }} ({{ item.conversion_factor }}x)
+        <div
+  v-if="item.uom !== item.stock_uom && item.conversion_factor !== 1"
+  class="text-[9px] text-gray-400 dark:text-gray-500 mt-0.5"
+>
+  {{ item.qty }} {{ item.uom }} =
+  {{ (item.qty * item.conversion_factor).toFixed(2) }}
+  {{ item.stock_uom }}
+</div>
+
+<div
+  v-if="item.uom !== item.stock_uom && item.conversion_factor !== 1"
+  class="text-[9px] text-blue-600 dark:text-blue-400"
+>
+  1 {{ item.uom }} =
+  {{ item.conversion_factor.toFixed(2) }}
+  {{ item.stock_uom }}
+</div>
         </div>
         <div v-if="item.item_tax_template" class="text-[9px] text-purple-500 dark:text-purple-400 mt-0.5">
           {{ item.item_tax_template }}
