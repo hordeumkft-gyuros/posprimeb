@@ -242,31 +242,55 @@ def create_pos_invoice(
         sales_team=sales_team,
     )
 
-    # Validate stock availability before submission
-    if profile.validate_stock_on_save:
-        for item_data in items:
-            item_code = item_data.get("item_code")
-            qty = safe_float(item_data.get("qty", 1))
-            item_warehouse = item_data.get("warehouse") or profile.warehouse
+    # Validate stock availability before submission.
+# The Bin quantity is always stored in Stock UOM, for example m2.
+# A POS line can be in an alternative UOM, for example Doboz.
+if profile.validate_stock_on_save:
+    for item_data in items:
+        item_code = item_data.get("item_code")
+        qty = safe_float(item_data.get("qty", 1))
+        conversion_factor = safe_float(item_data.get("conversion_factor", 1), 1)
+        item_warehouse = item_data.get("warehouse") or profile.warehouse
 
-            # Product Bundle: validate component stock instead
-            bundle_components = get_product_bundle_items(item_code)
-            if bundle_components:
-                validate_bundle_stock(item_code, qty, item_warehouse)
-                continue
+        # The requested quantity expressed in Stock UOM.
+        # Example: 10 Doboz × 1.23 = 12.30 m2.
+        stock_qty = qty * conversion_factor
 
-            is_stock_item = frappe.db.get_value("Item", item_code, "is_stock_item")
-            if not is_stock_item:
-                continue
-            actual_qty = frappe.db.get_value(
-                "Bin", {"item_code": item_code, "warehouse": item_warehouse}, "actual_qty"
-            ) or 0
-            if qty > actual_qty:
-                frappe.throw(
-                    _("{0}: Insufficient stock. Available: {1}, Requested: {2}").format(
-                        item_code, actual_qty, qty
-                    )
+        # Product Bundles use the bundle quantity as their own business logic.
+        # Do not apply the Item UOM factor to components here.
+        bundle_components = get_product_bundle_items(item_code)
+        if bundle_components:
+            validate_bundle_stock(item_code, qty, item_warehouse)
+            continue
+
+        is_stock_item = frappe.db.get_value(
+            "Item",
+            item_code,
+            "is_stock_item",
+        )
+
+        if not is_stock_item:
+            continue
+
+        actual_qty = frappe.db.get_value(
+            "Bin",
+            {
+                "item_code": item_code,
+                "warehouse": item_warehouse,
+            },
+            "actual_qty",
+        ) or 0
+
+        if stock_qty > actual_qty:
+            frappe.throw(
+                _(
+                    "{0}: Insufficient stock. Available: {1}, Requested: {2}"
+                ).format(
+                    item_code,
+                    actual_qty,
+                    stock_qty,
                 )
+            )
 
     # Store credit via advance Payment Entries
     store_credit = flt(store_credit_amount)
